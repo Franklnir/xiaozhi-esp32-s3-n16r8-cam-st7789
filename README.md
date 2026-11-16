@@ -1,0 +1,1 @@
+# xiaozhi-esp32-s3-n16r8-cam-st7789
