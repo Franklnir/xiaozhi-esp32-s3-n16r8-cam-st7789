@@ -61,24 +61,24 @@
 #define XCLK_FREQ_HZ      10000000  // 10MHz for GC2145 stability
 
 // ---- Display ST7789 Configuration ----
-//   Default: ST7789 240x240 (7-Pin SPI, Tanpa CS)
+//   Default: ST7789 240x280 (8-Pin SPI, CS GPIO 45)
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_38
 #define DISPLAY_MOSI_PIN      GPIO_NUM_20
 #define DISPLAY_CLK_PIN       GPIO_NUM_19
 #define DISPLAY_DC_PIN        GPIO_NUM_47
 #define DISPLAY_RST_PIN       GPIO_NUM_21
-#define DISPLAY_CS_PIN        GPIO_NUM_NC
+#define DISPLAY_CS_PIN        GPIO_NUM_45
 
 #define LCD_TYPE_ST7789_SERIAL
 #define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  240
+#define DISPLAY_HEIGHT  280
 #define DISPLAY_MIRROR_X false
 #define DISPLAY_MIRROR_Y false
 #define DISPLAY_SWAP_XY  false
 #define DISPLAY_INVERT_COLOR    true
 #define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
 #define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
+#define DISPLAY_OFFSET_Y  20
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 #define DISPLAY_SPI_MODE 0
 

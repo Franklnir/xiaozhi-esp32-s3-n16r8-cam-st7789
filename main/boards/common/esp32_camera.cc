@@ -435,15 +435,10 @@ std::string Esp32Camera::Explain(const std::string &question) {
         size_t offset = 0;
         while (remaining > 0) {
             size_t to_send = std::min(remaining, kChunkSize);
-            int written = http->Write((const char *)(captured_jpeg_buf_ + offset), to_send);
-            if (written <= 0 || static_cast<size_t>(written) > to_send) {
-                ESP_LOGE(TAG, "Failed to write JPEG data to HTTP");
-                http->Close();
-                throw std::runtime_error("Failed to write image data to HTTP");
-            }
-            total_sent += written;
-            offset += written;
-            remaining -= written;
+            http->Write((const char *)(captured_jpeg_buf_ + offset), to_send);
+            total_sent += to_send;
+            offset += to_send;
+            remaining -= to_send;
         }
     } else if (current_fb_ != nullptr) {
         // Fallback: encode raw frame to JPEG on the fly
@@ -531,13 +526,8 @@ std::string Esp32Camera::Explain(const std::string &question) {
                 saw_terminator = true;
                 break;
             }
-            int written = http->Write((const char *)chunk.data, chunk.len);
-            if (written <= 0 || static_cast<size_t>(written) > chunk.len) {
-                ESP_LOGE(TAG, "Failed to write JPEG chunk to HTTP");
-                heap_caps_free(chunk.data);
-                break;
-            }
-            total_sent += written;
+            http->Write((const char *)chunk.data, chunk.len);
+            total_sent += chunk.len;
             heap_caps_free(chunk.data);
         }
         encoder_thread_.join();

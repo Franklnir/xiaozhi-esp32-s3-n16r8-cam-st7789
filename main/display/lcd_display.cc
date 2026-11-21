@@ -454,27 +454,6 @@ bool LcdDisplay::Lock(int timeout_ms) { return lvgl_port_lock(timeout_ms); }
 
 void LcdDisplay::Unlock() { lvgl_port_unlock(); }
 
-void LcdDisplay::ShowEmotion() {
-    // Message cleanup must restore the selected renderer, not the boot logo.
-    if (emoji_label_ != nullptr) {
-        if (emotion_uses_image_) {
-            lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    if (emoji_image_ != nullptr) {
-        if (emotion_uses_image_) {
-            lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    if (emotion_uses_image_ && gif_controller_ && !gif_controller_->IsPlaying()) {
-        gif_controller_->Start();
-    }
-}
-
 // Helper to determine whether text should be dark or light for optimal contrast on any bubble background
 static inline lv_color_t GetContrastTextColor(lv_color_t bg) {
     uint32_t rgb = lv_color_to_int(bg);
@@ -958,8 +937,12 @@ void LcdDisplay::ClearChatMessages_Theme2() {
     // Reset chat_message_label_ as it has been deleted
     chat_message_label_ = nullptr;
 
-    // Restore the selected emotion
-    ShowEmotion();
+    // Restore the emoji label or image based on what's available
+    if (emoji_image_ != nullptr) {
+        lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+    } else if (emoji_label_ != nullptr) {
+        lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    }
 
     ESP_LOGI(TAG, "Chat messages cleared (Theme 2)");
 }
@@ -1554,8 +1537,8 @@ void LcdDisplay::SetEmotion(const char* emotion) {
             }
             lv_obj_set_style_text_font(emoji_label_, emotion_font, 0);
             lv_label_set_text(emoji_label_, utf8);
-            emotion_uses_image_ = false;
-            ShowEmotion();
+            lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
         }
         return;
     }
@@ -1581,18 +1564,16 @@ void LcdDisplay::SetEmotion(const char* emotion) {
             gif_controller_->Start();
 
             // Show GIF, hide others
-            emotion_uses_image_ = true;
-            ShowEmotion();
+            lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
         } else {
             ESP_LOGE(TAG, "Failed to load GIF for emotion: %s", emotion);
             gif_controller_.reset();
-            emotion_uses_image_ = false;
-            ShowEmotion();
         }
     } else {
         lv_image_set_src(emoji_image_, image->image_dsc());
-        emotion_uses_image_ = true;
-        ShowEmotion();
+        lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

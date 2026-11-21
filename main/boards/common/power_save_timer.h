@@ -23,7 +23,6 @@ private:
     bool enabled_ = false;
     bool in_sleep_mode_ = false;
     bool is_wake_word_running_ = false;
-    bool shutdown_requested_ = false;
     int ticks_ = 0;
     int cpu_max_freq_;
     int seconds_to_sleep_;

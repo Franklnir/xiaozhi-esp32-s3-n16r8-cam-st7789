@@ -36,16 +36,16 @@ public:
     // Quick boot check (non-blocking)
     static DeviceMode CheckBoot(gpio_num_t button_gpio) {
         Settings settings("chronchi", false);
-        int mode_val = settings.GetInt("mode", (int32_t)DeviceMode::CHRONCHI);
+        int mode_val = settings.GetInt("mode", (int32_t)DeviceMode::XIAOZHI);
         DeviceMode mode = static_cast<DeviceMode>(mode_val);
 
-        if (mode == DeviceMode::XIAOZHI) {
-            ESP_LOGI("ModeSelector", "Booting in XIAOZHI AI Assistant mode (saved mode)");
-            return DeviceMode::XIAOZHI;
+        if (mode == DeviceMode::CHRONCHI) {
+            ESP_LOGI("ModeSelector", "Booting in CHRONCHI Smartwatch mode (Chronos BLE active)");
+            return DeviceMode::CHRONCHI;
         }
 
-        ESP_LOGI("ModeSelector", "Booting in CHRONCHI Smartwatch mode (Chronos BLE active)");
-        return DeviceMode::CHRONCHI;
+        ESP_LOGI("ModeSelector", "Booting in XIAOZHI AI Assistant mode (saved mode)");
+        return DeviceMode::XIAOZHI;
     }
 
     // Launch mode selector UI using LVGL timer (runs in LVGL context)

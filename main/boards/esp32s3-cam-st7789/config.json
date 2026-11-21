@@ -19,6 +19,7 @@
                 "CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y",
                 "CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y",
                 "CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n",
+                "CONFIG_LANGUAGE_EN_US=y",
                 "CONFIG_ESP_BROWNOUT_DET=n",
                 "CONFIG_LV_FONT_MONTSERRAT_24=y",
                 "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=128",

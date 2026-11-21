@@ -275,12 +275,12 @@ private:
         if (cur_theme.empty()) {
             settings.SetString("theme", "dark");
         }
-        display_preset_ = settings.GetString("preset", "st7789_240x240_7p");
+        display_preset_ = settings.GetString("preset", "st7789_240x280_8p");
         backlight_pin_ = settings.GetInt("bl_pin", (int)DISPLAY_BACKLIGHT_PIN);
 
-        // Hapus preset fiktif 1.69" 7-pin dan normalisasi ke 240x240 7-pin
+        // Normalisasi jika preset kosong atau 7-pin ke 240x280 8-pin
         if (display_preset_.empty() || display_preset_ == "st7789_240x280_7p") {
-            display_preset_ = "st7789_240x240_7p";
+            display_preset_ = "st7789_240x280_8p";
         }
 
         if (display_preset_ == "headless") {
@@ -844,12 +844,13 @@ public:
         esp_brownout_disable();
         {
             Settings d_set("display", true);
-            if (d_set.GetInt("v5_sync", 0) == 0) {
-                d_set.SetInt("v5_sync", 1);
+            if (d_set.GetInt("v6_sync", 0) == 0) {
+                d_set.SetInt("v6_sync", 1);
                 std::string cur = d_set.GetString("preset", "");
-                if (cur.empty() || cur == "st7789_240x240_8p") {
-                    d_set.SetString("preset", "st7789_240x240_7p");
-                    d_set.SetInt("cs_pin", -1);
+                if (cur.empty() || cur == "st7789_240x240_7p" || cur == "st7789_240x280_7p") {
+                    d_set.SetString("preset", "st7789_240x280_8p");
+                    d_set.SetInt("cs_pin", 45);
+                    d_set.SetInt("offset_y", 20);
                 }
                 d_set.SetInt("scl_pin", 19);
                 d_set.SetInt("sda_pin", 20);
@@ -857,7 +858,15 @@ public:
                 d_set.SetInt("dc_pin", 47);
                 d_set.SetInt("bl_pin", 38);
                 d_set.SetInt("offset_x", 0);
-                d_set.SetInt("offset_y", 0);
+            }
+
+            Settings c_set("chronchi", true);
+            if (c_set.GetInt("v6_sync", 0) == 0) {
+                c_set.SetInt("v6_sync", 1);
+                int cur_mode = c_set.GetInt("mode", -1);
+                if (cur_mode == -1 || cur_mode == (int)DeviceMode::CHRONCHI) {
+                    c_set.SetInt("mode", (int32_t)DeviceMode::XIAOZHI);
+                }
             }
 
             Settings a_set("audio", true);
