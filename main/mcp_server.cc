@@ -241,6 +241,66 @@ void McpServer::AddCommonTools() {
             return result;
         });
 
+    AddTool("self.get_buttons_guide",
+        "PANDUAN LENGKAP FUNGSI TOMBOL FISIK PERANGKAT (Get Device Physical Buttons Guide & Click Counts):\n"
+        "Wajib gunakan tool ini SETIAP KALI pengguna bertanya tentang tombol fisik pada perangkat, misalnya: "
+        "'tombol ini bisa apa aja', 'fungsi tombol apa aja', 'tombol ini buat apa', 'harus di klik berapa kali', "
+        "'tombol boot buat apa', 'tombol volume atas buat apa', 'tombol volume bawah buat apa', 'berapa kali klik tombol boot', "
+        "'cara pakai tombol', 'apa guna tombol di alat ini', 'gimana cara ganti tema pakai tombol', 'cara pindah ke jam / chronchi pakai tombol', "
+        "'cara reset wifi pakai tombol', 'kombinasi tombol apa aja', atau pertanyaan apa pun mengenai tombol fisik dan jumlah kliknya.\n"
+        "Tool ini mengembalikan daftar 3 tombol fisik (BOOT GPIO 0, VOL UP GPIO 14, VOL DOWN GPIO 46) serta aksi lengkap: 1x klik, 2x klik, 3x klik, dan tekan tahan.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddStringToObject(root, "title", "Panduan Lengkap Fungsi 3 Tombol Fisik Perangkat XiaoZhi");
+            cJSON_AddStringToObject(root, "summary", "Perangkat ini memiliki 3 tombol fisik: 1. Tombol BOOT (GPIO 0), 2. Tombol Volume Atas / VOL UP (GPIO 14), 3. Tombol Volume Bawah / VOL DOWN (GPIO 46).");
+
+            cJSON* buttons = cJSON_CreateArray();
+
+            // Button 1: BOOT (GPIO 0)
+            cJSON* b1 = cJSON_CreateObject();
+            cJSON_AddStringToObject(b1, "name", "Tombol 1: BOOT");
+            cJSON_AddNumberToObject(b1, "gpio", 0);
+            cJSON* f1 = cJSON_CreateObject();
+            cJSON_AddStringToObject(f1, "1x_klik_single_click", "Mulai Bicara / Interupsi / Stop: Jika standby, langsung mulai mendengarkan/bicara tanpa wake word. Jika AI sedang berbicara, interupsi/hentikan suara AI. Jika lagu YouTube sedang diputar, stop pemutaran lagu.");
+            cJSON_AddStringToObject(f1, "2x_klik_double_click", "Ganti Tema Layar: Beralih secara instan antara Thema 1 Robot Mascot (wajah animasi robot) dan Thema 2 WhatsApp Bubble Chat UI.");
+            cJSON_AddStringToObject(f1, "3x_klik_triple_click", "Switch ke Mode Jam / Chronchi: Beralih ke mode Smartwatch / BLE companion (jam tangan pintar dengan sinkronisasi waktu & notifikasi ponsel).");
+            cJSON_AddStringToObject(f1, "tekan_tahan_long_press", "Reset / Portal Wi-Fi (>3 detik): Membuka kembali hotspot konfigurasi Web Config (192.168.4.1) untuk mengganti jaringan Wi-Fi.");
+            cJSON_AddItemToObject(b1, "functions", f1);
+            cJSON_AddItemToArray(buttons, b1);
+
+            // Button 2: VOLUME UP (GPIO 14)
+            cJSON* b2 = cJSON_CreateObject();
+            cJSON_AddStringToObject(b2, "name", "Tombol 2: Volume Atas (VOL UP)");
+            cJSON_AddNumberToObject(b2, "gpio", 14);
+            cJSON* f2 = cJSON_CreateObject();
+            cJSON_AddStringToObject(f2, "1x_klik_single_click", "Naikkan Volume +10%: Menambah volume suara speaker sebesar 10%. (Catatan: Jika live streaming kamera sedang aktif di layar, berfungsi sebagai Zoom In pembesaran kamera 1x hingga 10x).");
+            cJSON_AddStringToObject(f2, "2x_klik_double_click", "Rotasi Layar 180°: Memutar orientasi layar ST7789 180 derajat seketika tanpa perlu reboot.");
+            cJSON_AddStringToObject(f2, "tekan_tahan_long_press", "Volume Maksimal 100%: Mengatur suara speaker langsung ke volume maksimal (100% MAX).");
+            cJSON_AddItemToObject(b2, "functions", f2);
+            cJSON_AddItemToArray(buttons, b2);
+
+            // Button 3: VOLUME DOWN (GPIO 46)
+            cJSON* b3 = cJSON_CreateObject();
+            cJSON_AddStringToObject(b3, "name", "Tombol 3: Volume Bawah (VOL DOWN)");
+            cJSON_AddNumberToObject(b3, "gpio", 46);
+            cJSON* f3 = cJSON_CreateObject();
+            cJSON_AddStringToObject(f3, "1x_klik_single_click", "Turunkan Volume -10%: Mengurangi volume suara speaker sebesar 10%. (Catatan: Jika live streaming kamera sedang aktif di layar, berfungsi sebagai Zoom Out perkecil gambar).");
+            cJSON_AddStringToObject(f3, "2x_klik_double_click", "Switch ke Mode Jam / Chronchi: Beralih cepat ke mode Smartwatch / BLE companion.");
+            cJSON_AddStringToObject(f3, "tekan_tahan_long_press", "Mute Suara (0%): Membisukan audio seketika (Volume 0%).");
+            cJSON_AddItemToObject(b3, "functions", f3);
+            cJSON_AddItemToArray(buttons, b3);
+
+            cJSON_AddItemToObject(root, "buttons", buttons);
+            cJSON_AddStringToObject(root, "instruction_to_ai", "Jawab pertanyaan pengguna dengan ramah, jelas, dan terstruktur dalam Bahasa Indonesia. Jelaskan fungsi tombol yang ditanyakan secara detail beserta berapa kali klik yang harus dilakukan (1x klik, 2x klik, 3x klik, atau tekan tahan).");
+
+            char* json_str = cJSON_PrintUnformatted(root);
+            std::string result(json_str ? json_str : "{}");
+            if (json_str) free(json_str);
+            cJSON_Delete(root);
+            return result;
+        });
+
     AddTool("self.battery.get_status",
         "Dapatkan status baterai saat ini: persentase daya baterai (0-100%), voltase, dan status apakah sedang di-cas (charging) atau tidak. "
         "Gunakan tool ini ketika pengguna menanyakan status baterai, sisa baterai, persentase baterai, atau apakah baterai sedang di-cas / charger dicolok atau dicabut (misal 'baterai lagi di cas gak', 'cek status baterai', 'sisa baterai berapa', 'apakah lagi ngecas').",
@@ -994,59 +1054,6 @@ void McpServer::AddCommonTools() {
             cJSON_AddStringToObject(led, "red", "AI Mendengarkan (Listening)");
             cJSON_AddStringToObject(led, "off", "Standby / Idle");
             cJSON_AddItemToObject(root, "indicator_led", led);
-
-            char* json_str = cJSON_PrintUnformatted(root);
-            std::string result(json_str ? json_str : "{}");
-            if (json_str) free(json_str);
-            cJSON_Delete(root);
-            return result;
-        });
-
-    AddTool("self.get_buttons_guide",
-        "Dapatkan panduan lengkap dan fungsi dari ketiga (3) tombol fisik pada perangkat ini (Tombol BOOT, Tombol Volume Atas, Tombol Volume Bawah). "
-        "Gunakan tool ini ketika pengguna menanyakan fungsi tombol, apa saja tombol pada perangkat, tombol ini fungsinya buat apa, atau cara menggunakan tombol fisik (misal 'fungsi 3 tombol di alat ini apa aja', 'tombol boot buat apa', 'tombol volume atas buat apa', 'tombol volume bawah fungsinya apa', 'bagaimana cara pakai tombol').",
-        PropertyList(),
-        [](const PropertyList& properties) -> ReturnValue {
-            cJSON* root = cJSON_CreateObject();
-            cJSON_AddStringToObject(root, "title", "Panduan Fungsi 3 Tombol Fisik Perangkat");
-
-            cJSON* buttons = cJSON_CreateArray();
-
-            // Button 1: BOOT
-            cJSON* b1 = cJSON_CreateObject();
-            cJSON_AddStringToObject(b1, "name", "Tombol 1: BOOT");
-            cJSON_AddNumberToObject(b1, "gpio", 0);
-            cJSON* f1 = cJSON_CreateObject();
-            cJSON_AddStringToObject(f1, "single_click", "Bicara / Stop / Interupsi: Stop lagu YouTube jika sedang diputar, interupsi suara AI jika sedang berbicara, atau mulai mendengarkan tanpa wake-word jika standby (Toggle Chat).");
-            cJSON_AddStringToObject(f1, "double_click", "Putar Lagu Uji YouTube: Langsung memutar lagu pengujian audio remix dari YouTube secara instan.");
-            cJSON_AddStringToObject(f1, "triple_click", "Switch ke Mode Chronchi: Beralih ke mode Smartwatch / BLE companion (jam pintar).");
-            cJSON_AddStringToObject(f1, "long_press", "Reset / Portal Wi-Fi (>3s): Membuka kembali hotspot Web Config (192.168.4.1) untuk ganti SSID / Wi-Fi.");
-            cJSON_AddItemToObject(b1, "functions", f1);
-            cJSON_AddItemToArray(buttons, b1);
-
-            // Button 2: VOLUME UP
-            cJSON* b2 = cJSON_CreateObject();
-            cJSON_AddStringToObject(b2, "name", "Tombol 2: VOL UP");
-            cJSON_AddNumberToObject(b2, "gpio", 14);
-            cJSON* f2 = cJSON_CreateObject();
-            cJSON_AddStringToObject(f2, "single_click", "Volume +10% / Zoom In: Naikkan volume speaker +10%. Jika live streaming kamera aktif di layar: Zoom In (1x -> 2x -> 3x hingga 10x).");
-            cJSON_AddStringToObject(f2, "double_click", "Rotasi Layar 180°: Memutar tampilan layar ST7789 180 derajat seketika tanpa perlu restart.");
-            cJSON_AddStringToObject(f2, "long_press", "Volume Maksimal (100%): Mengatur volume speaker langsung ke batas tertinggi 100% MAX.");
-            cJSON_AddItemToObject(b2, "functions", f2);
-            cJSON_AddItemToArray(buttons, b2);
-
-            // Button 3: VOLUME DOWN
-            cJSON* b3 = cJSON_CreateObject();
-            cJSON_AddStringToObject(b3, "name", "Tombol 3: VOL DOWN");
-            cJSON_AddNumberToObject(b3, "gpio", 46);
-            cJSON* f3 = cJSON_CreateObject();
-            cJSON_AddStringToObject(f3, "single_click", "Volume -10% / Zoom Out: Turunkan volume speaker -10%. Jika live streaming kamera aktif di layar: Zoom Out perkecil gambar.");
-            cJSON_AddStringToObject(f3, "double_click", "Switch ke Mode Chronchi: Beralih antara mode Asisten Suara AI dan mode Jam Pintar / BLE Companion.");
-            cJSON_AddStringToObject(f3, "long_press", "Mute Suara (0%): Membisukan audio seketika (Volume 0%).");
-            cJSON_AddItemToObject(b3, "functions", f3);
-            cJSON_AddItemToArray(buttons, b3);
-
-            cJSON_AddItemToObject(root, "buttons", buttons);
 
             char* json_str = cJSON_PrintUnformatted(root);
             std::string result(json_str ? json_str : "{}");
