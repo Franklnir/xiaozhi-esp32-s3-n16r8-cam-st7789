@@ -1,23 +1,23 @@
 #include "sdkconfig.h"
 
 #include <esp_heap_caps.h>
-#include <cstdio>
-#include <cstring>
-#include <algorithm>
-#include <cctype>
 #include <esp_log.h>
 #include <img_converters.h>
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstring>
 
-#include "esp32_camera.h"
+#include "application.h"
 #include "board.h"
 #include "display.h"
+#include "esp32_camera.h"
+#include "esp_timer.h"
+#include "jpg/image_to_jpeg.h"
 #include "lvgl_display.h"
 #include "mcp_server.h"
-#include "system_info.h"
 #include "settings.h"
-#include "jpg/image_to_jpeg.h"
-#include "esp_timer.h"
-#include "application.h"
+#include "system_info.h"
 
 #define TAG "Esp32Camera"
 
@@ -34,12 +34,12 @@ static constexpr bool kConfiguredVFlip = false;
 #endif
 #endif
 
-Esp32Camera::Esp32Camera(const camera_config_t &config) : config_(config) {
+Esp32Camera::Esp32Camera(const camera_config_t& config) : config_(config) {
 #if CONFIG_XIAOZHI_CAMERA_MIRROR_CONFIGURED
     hmirror_enabled_ = kConfiguredHMirror;
     vflip_enabled_ = kConfiguredVFlip;
 #endif
-    photo_framesize_ = FRAMESIZE_QVGA; // Mandatory QVGA (320x240) for photo capture
+    photo_framesize_ = FRAMESIZE_QVGA;  // Mandatory QVGA (320x240) for photo capture
 
     // Default streaming resolution is always QVGA (320x240 RGB565).
     // Streaming resolution changes are strictly volatile (stored in RAM only, never saved to NVS)
@@ -60,24 +60,24 @@ Esp32Camera::Esp32Camera(const camera_config_t &config) : config_(config) {
         return;
     }
 
-    sensor_t *s = esp_camera_sensor_get();
+    sensor_t* s = esp_camera_sensor_get();
     if (s) {
         if (s->id.PID == GC0308_PID) {
-            s->set_hmirror(s, 0); // Control camera mirror: 1 for mirror, 0 for normal
+            s->set_hmirror(s, 0);  // Control camera mirror: 1 for mirror, 0 for normal
         }
         s->set_hmirror(s, hmirror_enabled_ ? 1 : 0);
         s->set_vflip(s, vflip_enabled_ ? 1 : 0);
         std::string sensor_name = "Camera";
-        if (s->id.PID == OV2640_PID) sensor_name = "OV2640";
-        else if (s->id.PID == OV3660_PID) sensor_name = "OV3660";
-        else if (s->id.PID == OV5640_PID) sensor_name = "OV5640";
+        if (s->id.PID == OV2640_PID)
+            sensor_name = "OV2640";
+        else if (s->id.PID == OV3660_PID)
+            sensor_name = "OV3660";
+        else if (s->id.PID == OV5640_PID)
+            sensor_name = "OV5640";
 
         ESP_LOGI(TAG, "%s initialized (PID=0x%x): stream=%s (%dx%d, format=%d), photo=QVGA (320x240)",
-                 sensor_name.c_str(),
-                 s->id.PID,
-                 stream_res_str_.c_str(),
-                 resolution[config_.frame_size].width,
-                 resolution[config_.frame_size].height,
+                 sensor_name.c_str(), s->id.PID, stream_res_str_.c_str(),
+                 resolution[config_.frame_size].width, resolution[config_.frame_size].height,
                  config_.pixel_format);
     }
 
@@ -107,14 +107,14 @@ Esp32Camera::~Esp32Camera() {
     }
 }
 
-void Esp32Camera::SetExplainUrl(const std::string &url, const std::string &token) {
+void Esp32Camera::SetExplainUrl(const std::string& url, const std::string& token) {
     explain_url_ = url;
     explain_token_ = token;
 }
 
 void Esp32Camera::ShowCapturedPhotoOnDisplay() {
-    auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
-    if (display == nullptr) {
+    auto display = Board::GetInstance().GetDisplay();
+    if (display == nullptr || !display->SupportsGuiOperations()) {
         return;
     }
 
@@ -122,7 +122,7 @@ void Esp32Camera::ShowCapturedPhotoOnDisplay() {
         esp_jpeg_image_cfg_t jpeg_cfg = {};
         jpeg_cfg.indata = captured_jpeg_buf_;
         jpeg_cfg.indata_size = captured_jpeg_len_;
-        
+
         esp_jpeg_image_output_t out_info = {};
         if (esp_jpeg_get_image_info(&jpeg_cfg, &out_info) != ESP_OK) {
             ESP_LOGW(TAG, "Failed to get JPEG info for preview");
@@ -145,7 +145,8 @@ void Esp32Camera::ShowCapturedPhotoOnDisplay() {
         uint16_t target_h = (out_info.height + divisor - 1) / divisor;
         size_t preview_size = target_w * target_h * 2;
 
-        uint8_t* preview_buf = (uint8_t*)heap_caps_malloc(preview_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        uint8_t* preview_buf =
+            (uint8_t*)heap_caps_malloc(preview_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (preview_buf == nullptr) {
             ESP_LOGE(TAG, "Failed to allocate %zu bytes for preview display", preview_size);
             return;
@@ -171,10 +172,11 @@ void Esp32Camera::ShowCapturedPhotoOnDisplay() {
     } else if (current_fb_ != nullptr && current_fb_->format == PIXFORMAT_RGB565) {
         size_t pixel_count = current_fb_->width * current_fb_->height;
         size_t data_size = pixel_count * 2;
-        uint8_t *preview_data = (uint8_t *)heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        uint8_t* preview_data =
+            (uint8_t*)heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (preview_data != nullptr) {
-            uint16_t *src = (uint16_t *)current_fb_->buf;
-            uint16_t *dst = (uint16_t *)preview_data;
+            uint16_t* src = (uint16_t*)current_fb_->buf;
+            uint16_t* dst = (uint16_t*)preview_data;
             for (size_t i = 0; i < pixel_count; i++) {
                 dst[i] = __builtin_bswap16(src[i]);
             }
@@ -228,7 +230,8 @@ bool Esp32Camera::Capture() {
         camera_fb_t* fb = nullptr;
         for (int retry = 0; retry < 3; retry++) {
             fb = esp_camera_fb_get();
-            if (fb && fb->len > 0) break;
+            if (fb && fb->len > 0)
+                break;
             if (fb) {
                 esp_camera_fb_return(fb);
                 fb = nullptr;
@@ -240,8 +243,8 @@ bool Esp32Camera::Capture() {
             ESP_LOGI(TAG, "Converting QVGA RGB565 to JPEG for photo capture...");
             uint8_t* out_jpg = nullptr;
             size_t out_len = 0;
-            bool ok = fmt2jpg(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 80,
-                              &out_jpg, &out_len);
+            bool ok = fmt2jpg(fb->buf, fb->len, fb->width, fb->height, PIXFORMAT_RGB565, 80, &out_jpg,
+                              &out_len);
             if (ok && out_jpg != nullptr && out_len > 0) {
                 captured_jpeg_buf_ = out_jpg;
                 captured_jpeg_len_ = out_len;
@@ -261,7 +264,8 @@ bool Esp32Camera::Capture() {
         camera_fb_t* fb = nullptr;
         for (int retry = 0; retry < 3; retry++) {
             fb = esp_camera_fb_get();
-            if (fb && fb->len > 0) break;
+            if (fb && fb->len > 0)
+                break;
             if (fb) {
                 esp_camera_fb_return(fb);
                 fb = nullptr;
@@ -270,7 +274,8 @@ bool Esp32Camera::Capture() {
         }
 
         if (fb) {
-            captured_jpeg_buf_ = (uint8_t*)heap_caps_malloc(fb->len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            captured_jpeg_buf_ =
+                (uint8_t*)heap_caps_malloc(fb->len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (captured_jpeg_buf_) {
                 memcpy(captured_jpeg_buf_, fb->buf, fb->len);
                 captured_jpeg_len_ = fb->len;
@@ -301,15 +306,16 @@ bool Esp32Camera::Capture() {
         if (reconf_err == ESP_OK) {
             vTaskDelay(pdMS_TO_TICKS(50));
             // Discard 1 frame
-            camera_fb_t *discard_fb = esp_camera_fb_get();
+            camera_fb_t* discard_fb = esp_camera_fb_get();
             if (discard_fb) {
                 esp_camera_fb_return(discard_fb);
             }
             vTaskDelay(pdMS_TO_TICKS(30));
 
-            camera_fb_t *photo_fb = esp_camera_fb_get();
+            camera_fb_t* photo_fb = esp_camera_fb_get();
             if (photo_fb && photo_fb->len > 0) {
-                captured_jpeg_buf_ = (uint8_t*)heap_caps_malloc(photo_fb->len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                captured_jpeg_buf_ =
+                    (uint8_t*)heap_caps_malloc(photo_fb->len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 if (captured_jpeg_buf_) {
                     memcpy(captured_jpeg_buf_, photo_fb->buf, photo_fb->len);
                     captured_jpeg_len_ = photo_fb->len;
@@ -320,16 +326,18 @@ bool Esp32Camera::Capture() {
                 }
                 esp_camera_fb_return(photo_fb);
             } else {
-                if (photo_fb) esp_camera_fb_return(photo_fb);
+                if (photo_fb)
+                    esp_camera_fb_return(photo_fb);
                 ESP_LOGE(TAG, "Failed to capture photo frame after reconfigure");
             }
 
             // Restore stream configuration
             ESP_LOGI(TAG, "Restoring stream configuration (%dx%d, format=%d)...",
-                     resolution[config_.frame_size].width, resolution[config_.frame_size].height, config_.pixel_format);
+                     resolution[config_.frame_size].width, resolution[config_.frame_size].height,
+                     config_.pixel_format);
             esp_camera_reconfigure(&config_);
             vTaskDelay(pdMS_TO_TICKS(50));
-            sensor_t *s = esp_camera_sensor_get();
+            sensor_t* s = esp_camera_sensor_get();
             if (s) {
                 s->set_hmirror(s, hmirror_enabled_ ? 1 : 0);
                 s->set_vflip(s, vflip_enabled_ ? 1 : 0);
@@ -358,7 +366,7 @@ bool Esp32Camera::Capture() {
 
 bool Esp32Camera::SetHMirror(bool enabled) {
     hmirror_enabled_ = enabled;
-    sensor_t *s = esp_camera_sensor_get();
+    sensor_t* s = esp_camera_sensor_get();
     if (!s) {
         return false;
     }
@@ -369,7 +377,7 @@ bool Esp32Camera::SetHMirror(bool enabled) {
 
 bool Esp32Camera::SetVFlip(bool enabled) {
     vflip_enabled_ = enabled;
-    sensor_t *s = esp_camera_sensor_get();
+    sensor_t* s = esp_camera_sensor_get();
     if (!s) {
         return false;
     }
@@ -383,187 +391,159 @@ bool Esp32Camera::SetSwapBytes(bool enabled) {
     return true;
 }
 
-std::string Esp32Camera::Explain(const std::string &question) {
-    if (explain_url_.empty()) {
-        throw std::runtime_error("Image explain URL or token is not set");
+std::expected<std::string, std::string> Esp32Camera::Explain(const std::string& question) {
+    return Explain(question, explain_url_, explain_token_);
+}
+
+std::expected<std::string, std::string> Esp32Camera::Explain(const std::string& question,
+                                                             const std::string& url,
+                                                             const std::string& token) {
+    if (url.empty()) {
+        return std::unexpected("Image explain URL or token is not set");
     }
 
     if (captured_jpeg_buf_ == nullptr && current_fb_ == nullptr) {
-        throw std::runtime_error("No camera frame captured");
+        return std::unexpected("No camera frame captured");
     }
+
+    const uint8_t* upload_buf = nullptr;
+    size_t upload_size = 0;
+    uint8_t* temp_jpeg_data = nullptr;
+    int img_w = 0;
+    int img_h = 0;
+
+    if (captured_jpeg_buf_ != nullptr && captured_jpeg_len_ > 0) {
+        upload_buf = captured_jpeg_buf_;
+        upload_size = captured_jpeg_len_;
+        img_w = captured_width_;
+        img_h = captured_height_;
+        ESP_LOGI(TAG, "Preparing captured JPEG (%dx%d, %zu bytes) for upload...", img_w, img_h,
+                 upload_size);
+    } else {
+        // Fallback: encode raw frame synchronously so explicit Content-Length can be sent.
+        const uint16_t w = current_fb_->width;
+        const uint16_t h = current_fb_->height;
+        v4l2_pix_fmt_t enc_fmt;
+        switch (current_fb_->format) {
+            case PIXFORMAT_RGB565:
+                enc_fmt = V4L2_PIX_FMT_RGB565;
+                break;
+            case PIXFORMAT_YUV422:
+                enc_fmt = V4L2_PIX_FMT_YUYV;
+                break;
+            case PIXFORMAT_YUV420:
+                enc_fmt = V4L2_PIX_FMT_YUV420;
+                break;
+            case PIXFORMAT_GRAYSCALE:
+                enc_fmt = V4L2_PIX_FMT_GREY;
+                break;
+            case PIXFORMAT_JPEG:
+                enc_fmt = V4L2_PIX_FMT_JPEG;
+                break;
+            case PIXFORMAT_RGB888:
+                enc_fmt = V4L2_PIX_FMT_RGB24;
+                break;
+            default:
+                ESP_LOGE(TAG, "Unsupported pixel format: %d", current_fb_->format);
+                return std::unexpected("Unsupported pixel format");
+        }
+
+        uint8_t* jpeg_src_buf = current_fb_->buf;
+        size_t jpeg_src_len = current_fb_->len;
+        if (current_fb_->format == PIXFORMAT_RGB565 && encode_buf_ != nullptr) {
+            jpeg_src_buf = encode_buf_;
+            jpeg_src_len = encode_buf_size_;
+        }
+
+        int64_t start_time = esp_timer_get_time();
+        size_t jpeg_size = 0;
+        bool ok = image_to_jpeg(jpeg_src_buf, jpeg_src_len, w, h, enc_fmt, 80, &temp_jpeg_data,
+                                &jpeg_size);
+        ESP_LOGI(TAG, "JPEG encoding time: %ld ms", int((esp_timer_get_time() - start_time) / 1000));
+        if (!ok || temp_jpeg_data == nullptr || jpeg_size == 0) {
+            free(temp_jpeg_data);
+            ESP_LOGE(TAG, "JPEG encoder failed or produced empty output");
+            return std::unexpected("Failed to encode image to JPEG");
+        }
+        upload_buf = temp_jpeg_data;
+        upload_size = jpeg_size;
+        img_w = w;
+        img_h = h;
+    }
+
+    const std::string boundary = "----ESP32_CAMERA_BOUNDARY";
+    std::string head;
+    head += "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"question\"\r\n\r\n";
+    head += question + "\r\n";
+    head += "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"file\"; filename=\"camera.jpg\"\r\n";
+    head += "Content-Type: image/jpeg\r\n\r\n";
+    const std::string tail = "\r\n--" + boundary + "--\r\n";
 
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(3);
-    std::string boundary = "----ESP32_CAMERA_BOUNDARY";
-
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
-    if (!explain_token_.empty()) {
-        http->SetHeader("Authorization", "Bearer " + explain_token_);
+    if (!token.empty()) {
+        http->SetHeader("Authorization", "Bearer " + token);
     }
     http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-    http->SetHeader("Transfer-Encoding", "chunked");
-    if (!http->Open("POST", explain_url_)) {
-        ESP_LOGE(TAG, "Failed to connect to explain URL");
-        throw std::runtime_error("Failed to connect to explain URL");
+    // An explicit Content-Length makes Http::Write() send raw bytes instead of
+    // chunk framing (ALB rejects chunked uploads).
+    http->SetHeader("Content-Length", std::to_string(head.size() + upload_size + tail.size()));
+    if (auto opened = http->Open("POST", url); !opened) {
+        free(temp_jpeg_data);
+        ESP_LOGE(TAG, "Failed to upload photo: %s", opened.error().ToString().c_str());
+        http->Close();
+        return std::unexpected("Failed to upload photo");
     }
 
-    {
-        std::string question_field;
-        question_field += "--" + boundary + "\r\n";
-        question_field += "Content-Disposition: form-data; name=\"question\"\r\n";
-        question_field += "\r\n";
-        question_field += question + "\r\n";
-        http->Write(question_field.c_str(), question_field.size());
-    }
-    {
-        std::string file_header;
-        file_header += "--" + boundary + "\r\n";
-        file_header += "Content-Disposition: form-data; name=\"file\"; filename=\"camera.jpg\"\r\n";
-        file_header += "Content-Type: image/jpeg\r\n";
-        file_header += "\r\n";
-        http->Write(file_header.c_str(), file_header.size());
-    }
-
-    size_t total_sent = 0;
-
-    if (captured_jpeg_buf_ != nullptr && captured_jpeg_len_ > 0) {
-        ESP_LOGI(TAG, "Streaming high-res JPEG (%dx%d, %zu bytes) directly to HTTP...",
-                 captured_width_, captured_height_, captured_jpeg_len_);
+    auto write_all = [&http](const void* data, size_t size) -> bool {
+        const char* ptr = static_cast<const char*>(data);
         const size_t kChunkSize = 4096;
-        size_t remaining = captured_jpeg_len_;
-        size_t offset = 0;
-        while (remaining > 0) {
-            size_t to_send = std::min(remaining, kChunkSize);
-            http->Write((const char *)(captured_jpeg_buf_ + offset), to_send);
-            total_sent += to_send;
-            offset += to_send;
-            remaining -= to_send;
+        while (size > 0) {
+            size_t to_send = std::min(size, kChunkSize);
+            auto written = http->Write(ptr, to_send);
+            if (!written || *written <= 0 || static_cast<size_t>(*written) > to_send) {
+                return false;
+            }
+            ptr += *written;
+            size -= static_cast<size_t>(*written);
         }
-    } else if (current_fb_ != nullptr) {
-        // Fallback: encode raw frame to JPEG on the fly
-        QueueHandle_t jpeg_queue = xQueueCreate(20, sizeof(JpegChunk));
-        if (jpeg_queue == nullptr) {
-            ESP_LOGE(TAG, "Failed to create JPEG queue");
-            throw std::runtime_error("Failed to create JPEG queue");
-        }
+        return true;
+    };
 
-        encoder_thread_ = std::thread([this, jpeg_queue]() {
-            int64_t start_time = esp_timer_get_time();
-            uint16_t w = current_fb_->width;
-            uint16_t h = current_fb_->height;
-            v4l2_pix_fmt_t enc_fmt;
-            switch (current_fb_->format) {
-                case PIXFORMAT_RGB565:
-                    enc_fmt = V4L2_PIX_FMT_RGB565;
-                    break;
-                case PIXFORMAT_YUV422:
-                    enc_fmt = V4L2_PIX_FMT_YUYV;
-                    break;
-                case PIXFORMAT_YUV420:
-                    enc_fmt = V4L2_PIX_FMT_YUV420;
-                    break;
-                case PIXFORMAT_GRAYSCALE:
-                    enc_fmt = V4L2_PIX_FMT_GREY;
-                    break;
-                case PIXFORMAT_JPEG:
-                    enc_fmt = V4L2_PIX_FMT_JPEG;
-                    break;
-                case PIXFORMAT_RGB888:
-                    enc_fmt = V4L2_PIX_FMT_RGB24;
-                    break;
-                default:
-                    ESP_LOGE(TAG, "Unsupported pixel format: %d", current_fb_->format);
-                    {
-                        JpegChunk chunk = {.data = nullptr, .len = 0};
-                        xQueueSend(jpeg_queue, &chunk, portMAX_DELAY);
-                    }
-                    return;
-            }
-
-            uint8_t *jpeg_src_buf = current_fb_->buf;
-            size_t jpeg_src_len = current_fb_->len;
-            if (current_fb_->format == PIXFORMAT_RGB565 && encode_buf_ != nullptr) {
-                jpeg_src_buf = encode_buf_;
-                jpeg_src_len = encode_buf_size_;
-            }
-
-            bool ok = image_to_jpeg_cb(jpeg_src_buf, jpeg_src_len, w, h, enc_fmt, 80,
-                [](void* arg, size_t index, const void* data, size_t len) -> size_t {
-                    auto jq = static_cast<QueueHandle_t>(arg);
-                    JpegChunk chunk = {.data = nullptr, .len = len};
-                    if (index == 0 && data != nullptr && len > 0) {
-                        chunk.data = (uint8_t*)heap_caps_aligned_alloc(16, len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                        if (chunk.data == nullptr) {
-                            ESP_LOGE(TAG, "Failed to allocate %zu bytes for JPEG chunk", len);
-                            chunk.len = 0;
-                        } else {
-                            memcpy(chunk.data, data, len);
-                        }
-                    } else {
-                        chunk.len = 0;
-                    }
-                    xQueueSend(jq, &chunk, portMAX_DELAY);
-                    return len;
-                }, jpeg_queue);
-
-            if (!ok) {
-                JpegChunk chunk = {.data = nullptr, .len = 0};
-                xQueueSend(jpeg_queue, &chunk, portMAX_DELAY);
-            }
-            int64_t end_time = esp_timer_get_time();
-            ESP_LOGI(TAG, "JPEG encoding time: %ld ms", int((end_time - start_time) / 1000));
-        });
-
-        bool saw_terminator = false;
-        while (true) {
-            JpegChunk chunk;
-            if (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) != pdPASS) {
-                ESP_LOGE(TAG, "Failed to receive JPEG chunk");
-                break;
-            }
-            if (chunk.data == nullptr) {
-                saw_terminator = true;
-                break;
-            }
-            http->Write((const char *)chunk.data, chunk.len);
-            total_sent += chunk.len;
-            heap_caps_free(chunk.data);
-        }
-        encoder_thread_.join();
-        vQueueDelete(jpeg_queue);
-
-        if (!saw_terminator || total_sent == 0) {
-            ESP_LOGE(TAG, "JPEG encoder failed or produced empty output");
-            throw std::runtime_error("Failed to encode image to JPEG");
-        }
+    bool uploaded = write_all(head.data(), head.size()) && write_all(upload_buf, upload_size) &&
+                    write_all(tail.data(), tail.size());
+    free(temp_jpeg_data);
+    if (!uploaded) {
+        ESP_LOGE(TAG, "Failed to upload photo body");
+        http->Close();
+        return std::unexpected("Failed to upload photo");
     }
+    ESP_LOGI(TAG, "Explain upload done: jpeg=%u bytes, content-length=%u", (unsigned)upload_size,
+             (unsigned)(head.size() + upload_size + tail.size()));
 
-    if (total_sent == 0) {
-        ESP_LOGE(TAG, "No image data sent to explain server");
-        throw std::runtime_error("Failed to send image to server");
+    auto status_code = http->GetStatusCode();
+    if (!status_code) {
+        ESP_LOGE(TAG, "Failed to read HTTP status: %s", status_code.error().ToString().c_str());
+        http->Close();
+        return std::unexpected("Failed to upload photo");
     }
-
-    {
-        std::string multipart_footer;
-        multipart_footer += "\r\n--" + boundary + "--\r\n";
-        http->Write(multipart_footer.c_str(), multipart_footer.size());
-    }
-    http->Write("", 0);
-
-    if (http->GetStatusCode() != 200) {
-        ESP_LOGE(TAG, "Failed to upload photo, status code: %d", http->GetStatusCode());
-        throw std::runtime_error("Failed to upload photo");
+    if (*status_code != 200) {
+        ESP_LOGE(TAG, "Failed to upload photo, status code: %d", *status_code);
+        http->Close();
+        return std::unexpected("Failed to upload photo");
     }
 
     std::string result = http->ReadAll();
     http->Close();
 
     size_t remain_stack_size = uxTaskGetStackHighWaterMark(nullptr);
-    int img_w = (captured_jpeg_buf_ != nullptr) ? captured_width_ : (current_fb_ ? current_fb_->width : 0);
-    int img_h = (captured_jpeg_buf_ != nullptr) ? captured_height_ : (current_fb_ ? current_fb_->height : 0);
     ESP_LOGI(TAG, "Explain image size=%dx%d, compressed size=%d, remain stack size=%d, question=%s\n%s",
-             img_w, img_h, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
+             img_w, img_h, (int)upload_size, (int)remain_stack_size, question.c_str(),
+             result.c_str());
 
     // Clean up captured JPEG buffer after upload
     if (captured_jpeg_buf_) {
@@ -576,7 +556,8 @@ std::string Esp32Camera::Explain(const std::string &question) {
 }
 
 // ── Streaming Implementation ──
-void Esp32Camera::SetStreamCallback(std::function<void(uint8_t* data, size_t len, uint16_t w, uint16_t h)> callback) {
+void Esp32Camera::SetStreamCallback(
+    std::function<void(uint8_t* data, size_t len, uint16_t w, uint16_t h)> callback) {
     stream_callback_ = callback;
 }
 
@@ -585,19 +566,19 @@ bool Esp32Camera::StartStreaming() {
         ESP_LOGW(TAG, "Already streaming");
         return true;
     }
-    
+
     if (!streaming_on_) {
         ESP_LOGE(TAG, "Camera not initialized");
         return false;
     }
-    
+
     is_streaming_.store(true);
     stream_paused_.store(false);
-    
+
     // Start streaming thread
     stream_thread_ = std::thread([this]() {
         ESP_LOGI(TAG, "Camera streaming started");
-        
+
         while (is_streaming_.load()) {
             if (stream_paused_.load()) {
                 // If stream was paused for photo capture and AI has finished speaking, auto-resume stream
@@ -648,23 +629,23 @@ bool Esp32Camera::StartStreaming() {
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
-            
+
             // Call the callback with frame data (only if not paused)
             if (stream_callback_ && !stream_paused_.load()) {
                 stream_callback_(fb->buf, fb->len, fb->width, fb->height);
             }
-            
+
             // Return the frame buffer
             esp_camera_fb_return(fb);
             stream_frame_busy_.store(false);
-            
+
             // ~15 FPS target
             vTaskDelay(pdMS_TO_TICKS(66));
         }
-        
+
         ESP_LOGI(TAG, "Camera streaming stopped");
     });
-    
+
     return true;
 }
 
@@ -672,23 +653,26 @@ void Esp32Camera::StopStreaming() {
     if (!is_streaming_.load()) {
         return;
     }
-    
+
     is_streaming_.store(false);
-    
+
     if (stream_thread_.joinable()) {
         stream_thread_.join();
     }
-    
+
     ESP_LOGI(TAG, "Camera streaming stopped");
 }
 
 std::string Esp32Camera::GetSupportedStreamingResolutions() const {
-    sensor_t *s = esp_camera_sensor_get();
+    sensor_t* s = esp_camera_sensor_get();
     std::string sensor_name = "Kamera";
     if (s) {
-        if (s->id.PID == OV2640_PID) sensor_name = "OV2640";
-        else if (s->id.PID == OV3660_PID) sensor_name = "OV3660";
-        else if (s->id.PID == OV5640_PID) sensor_name = "OV5640";
+        if (s->id.PID == OV2640_PID)
+            sensor_name = "OV2640";
+        else if (s->id.PID == OV3660_PID)
+            sensor_name = "OV3660";
+        else if (s->id.PID == OV5640_PID)
+            sensor_name = "OV5640";
     }
 
     std::string info;
@@ -704,15 +688,18 @@ std::string Esp32Camera::GetSupportedStreamingResolutions() const {
 }
 
 std::string Esp32Camera::GetStreamingResolution() const {
-    return stream_res_str_ + " (" +
-           std::to_string(resolution[config_.frame_size].width) + "x" +
+    return stream_res_str_ + " (" + std::to_string(resolution[config_.frame_size].width) + "x" +
            std::to_string(resolution[config_.frame_size].height) + ")";
 }
 
 bool Esp32Camera::SetStreamingResolution(const std::string& res_str) {
     std::string res = res_str;
     std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::tolower(c); });
-    res.erase(0, res.find_first_not_of(" \t\n\r"));
+    auto first = res.find_first_not_of(" \t\n\r");
+    if (first == std::string::npos) {
+        return false;
+    }
+    res.erase(0, first);
     res.erase(res.find_last_not_of(" \t\n\r") + 1);
 
     framesize_t target_size;
@@ -725,7 +712,8 @@ bool Esp32Camera::SetStreamingResolution(const std::string& res_str) {
         target_size = FRAMESIZE_VGA;
         norm_name = "vga";
     } else {
-        ESP_LOGW(TAG, "Unsupported streaming resolution requested: %s (supported: qvga, vga)", res_str.c_str());
+        ESP_LOGW(TAG, "Unsupported streaming resolution requested: %s (supported: qvga, vga)",
+                 res_str.c_str());
         return false;
     }
 
@@ -745,7 +733,7 @@ bool Esp32Camera::SetStreamingResolution(const std::string& res_str) {
     {
         std::lock_guard<std::mutex> lock(camera_mutex_);
         config_.frame_size = target_size;
-        config_.pixel_format = PIXFORMAT_RGB565; // Native RGB565 for perfect colors
+        config_.pixel_format = PIXFORMAT_RGB565;  // Native RGB565 for perfect colors
         config_.fb_count = 2;
         config_.fb_location = CAMERA_FB_IN_PSRAM;
         config_.grab_mode = CAMERA_GRAB_LATEST;
@@ -763,14 +751,14 @@ bool Esp32Camera::SetStreamingResolution(const std::string& res_str) {
 
         // Flush any stale frames from previous mode
         for (int i = 0; i < 2; i++) {
-            camera_fb_t *discard_fb = esp_camera_fb_get();
+            camera_fb_t* discard_fb = esp_camera_fb_get();
             if (discard_fb) {
                 esp_camera_fb_return(discard_fb);
             }
             vTaskDelay(pdMS_TO_TICKS(20));
         }
 
-        sensor_t *s = esp_camera_sensor_get();
+        sensor_t* s = esp_camera_sensor_get();
         if (s) {
             s->set_hmirror(s, hmirror_enabled_ ? 1 : 0);
             s->set_vflip(s, vflip_enabled_ ? 1 : 0);
@@ -802,4 +790,3 @@ void Esp32Camera::OnDeviceStateChanged(DeviceState state) {
         }
     }
 }
-

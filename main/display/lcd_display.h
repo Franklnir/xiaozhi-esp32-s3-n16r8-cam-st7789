@@ -51,6 +51,7 @@ protected:
 
     int ui_theme_id_ = 1;
     bool is_st7789_ = false;
+    bool emotion_uses_image_ = false;
     lv_obj_t* avatar_circle_ = nullptr;
 
     void SetupUI_Theme1();
@@ -60,8 +61,11 @@ protected:
     void SetChatMessage_Theme2(const char* role, const char* content);
     void SetPreviewImage_Theme1(std::unique_ptr<LvglImage> image);
     void SetPreviewImage_Theme2(std::unique_ptr<LvglImage> image);
+    void RemoveChatMessage_Theme1(const char* role, const char* content);
+    void RemoveChatMessage_Theme2(const char* role, const char* content);
     void ClearChatMessages_Theme1();
     void ClearChatMessages_Theme2();
+    void ShowEmotion();
 
     void CreateMusicVisualizerUI();
 
@@ -77,16 +81,18 @@ protected:
 public:
     ~LcdDisplay();
     virtual void SetStatus(const char* status) override;
-    virtual void SetEmotion(const char* emotion) override;
+    virtual bool SetEmotion(const char* emotion) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
+    virtual void RemoveChatMessage(const char* role, const char* content) override;
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
-    void ShowCaptureFlash();
+    virtual bool IsLcdDisplay() const override { return true; }
+    virtual void ShowCaptureFlash() override;
     void SetZoom(bool zoomed);
     void SetZoomLevel(int level);
     int GetZoomLevel() const { return zoom_level_; }
-    int ZoomIn();
-    int ZoomOut();
+    virtual int ZoomIn() override;
+    virtual int ZoomOut() override;
     virtual void SetupUI() override;
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;
@@ -98,7 +104,7 @@ public:
     virtual bool IsSt7789() const override { return is_st7789_; }
 
     // Set whether to hide chat messages/subtitles
-    void SetHideSubtitle(bool hide);
+    virtual void SetHideSubtitle(bool hide) override;
 
     // DJ Music Visualizer
     virtual void StartMusicVisualizer(const char* title = nullptr, int total_sec = 0) override;

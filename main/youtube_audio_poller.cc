@@ -261,8 +261,10 @@ bool YouTubeAudioPoller::FetchDirect(const std::string& query, std::string& vide
     http->SetHeader("Device-Id", mac.c_str());
     http->SetHeader("X-Device-Mac", mac.c_str());
 
-    bool opened = http->Open("GET", url);
-    int status = opened ? http->GetStatusCode() : 0;
+    auto open_res = http->Open("GET", url);
+    bool opened = static_cast<bool>(open_res);
+    auto status_res = opened ? http->GetStatusCode() : NetworkResult<int>(0);
+    int status = status_res ? *status_res : 0;
     if (status == 301 || status == 302) {
         std::string loc = http->GetResponseHeader("Location");
         if (!loc.empty()) {
@@ -272,8 +274,10 @@ bool YouTubeAudioPoller::FetchDirect(const std::string& query, std::string& vide
             http->SetHeader("User-Agent", "ESP32-XiaoZhi");
             http->SetHeader("Device-Id", mac.c_str());
             http->SetHeader("X-Device-Mac", mac.c_str());
-            opened = http->Open("GET", url);
-            status = opened ? http->GetStatusCode() : 0;
+            open_res = http->Open("GET", url);
+            opened = static_cast<bool>(open_res);
+            status_res = opened ? http->GetStatusCode() : NetworkResult<int>(0);
+            status = status_res ? *status_res : 0;
         }
     }
 
@@ -349,14 +353,16 @@ bool YouTubeAudioPoller::FetchCommands(int& cmd_id, std::string& video_id, std::
     http->SetHeader("X-Device-Chip", chip.c_str());
     http->SetHeader("Device-Chip", chip.c_str());
 
-    if (!http->Open("GET", url)) {
-        ESP_LOGW(TAG, "FetchCommands: Failed to connect to %s", url.c_str());
+    if (auto open_res = http->Open("GET", url); !open_res) {
+        ESP_LOGW(TAG, "FetchCommands: Failed to connect to %s (%s)", url.c_str(),
+                 open_res.error().ToString().c_str());
         http->Close();
         return false;
     }
 
-    if (http->GetStatusCode() != 200) {
-        ESP_LOGW(TAG, "FetchCommands: HTTP returned status %d", http->GetStatusCode());
+    auto status_res = http->GetStatusCode();
+    if (!status_res || *status_res != 200) {
+        ESP_LOGW(TAG, "FetchCommands: HTTP returned status %d", status_res ? *status_res : -1);
         http->Close();
         return false;
     }
@@ -451,7 +457,8 @@ bool YouTubeAudioPoller::AckCommand(int cmd_id) {
     http->SetHeader("Device-Chip", chip.c_str());
     http->SetContent(std::move(payload));
 
-    bool ok = http->Open("POST", url);
+    auto open_res = http->Open("POST", url);
+    bool ok = static_cast<bool>(open_res);
     if (ok) {
         http->ReadAll();
     }
@@ -726,8 +733,10 @@ void YouTubeAudioPoller::StreamAudio(const std::string& video_id, const std::str
         http->SetHeader("Device-Chip", chip.c_str());
 
         ESP_LOGI(TAG, "Connecting to stream URL: %s", stream_url.c_str());
-        bool opened = http->Open("GET", stream_url);
-        int status = opened ? http->GetStatusCode() : 0;
+        auto open_res = http->Open("GET", stream_url);
+        bool opened = static_cast<bool>(open_res);
+        auto status_res = opened ? http->GetStatusCode() : NetworkResult<int>(0);
+        int status = status_res ? *status_res : 0;
         if (status == 301 || status == 302) {
             std::string loc = http->GetResponseHeader("Location");
             if (!loc.empty()) {
@@ -740,8 +749,10 @@ void YouTubeAudioPoller::StreamAudio(const std::string& video_id, const std::str
                 http->SetHeader("X-Device-Mac", mac.c_str());
                 http->SetHeader("X-Device-Chip", chip.c_str());
                 http->SetHeader("Device-Chip", chip.c_str());
-                opened = http->Open("GET", stream_url);
-                status = opened ? http->GetStatusCode() : 0;
+                open_res = http->Open("GET", stream_url);
+                opened = static_cast<bool>(open_res);
+                status_res = opened ? http->GetStatusCode() : NetworkResult<int>(0);
+                status = status_res ? *status_res : 0;
             }
         }
 
@@ -811,7 +822,7 @@ void YouTubeAudioPoller::StreamAudio(const std::string& video_id, const std::str
         std::vector<std::unique_ptr<AudioStreamPacket>> prebuffer;
         bool is_prebuffering = true;
 
-        try {
+        {
             while (running_.load() && !abort_requested_.load() && !stop_stream) {
                 int64_t now_us = esp_timer_get_time();
                 bool playback_idle = app.GetAudioService().IsPlaybackIdle();
@@ -943,7 +954,8 @@ void YouTubeAudioPoller::StreamAudio(const std::string& video_id, const std::str
                     avail = kOggBufCap - ogg_len;
                 }
                 int to_read = (int)std::min((size_t)4096, avail);
-                int n = http->Read(reinterpret_cast<char*>(ogg_buf.get() + ogg_len), to_read);
+                auto read_res = http->Read(reinterpret_cast<char*>(ogg_buf.get() + ogg_len), to_read);
+                int n = read_res ? *read_res : -1;
                 if (n < 0) {
                     ESP_LOGW(TAG, "HTTP read error or stream closed (ret=%d, total=%u, frames=%d)",
                              n, (unsigned int)total_bytes_streamed, frames_pushed);
@@ -1232,8 +1244,6 @@ void YouTubeAudioPoller::StreamAudio(const std::string& video_id, const std::str
                     }
                 }
             }
-        } catch (const std::exception& e) {
-            ESP_LOGE(TAG, "StreamAudio exception: %s", e.what());
         }
 
         // Flush sisa prebuffer jika stream terputus sebelum mencapai target

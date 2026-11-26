@@ -319,18 +319,18 @@ private:
 
             esp_lcd_panel_io_i2c_config_t io_config = {
                 .dev_addr = 0x3C,
-                .on_color_trans_done = nullptr,
-                .user_ctx = nullptr,
+                .scl_speed_hz = 400 * 1000,
                 .control_phase_bytes = 1,
                 .dc_bit_offset = 6,
                 .lcd_cmd_bits = 8,
                 .lcd_param_bits = 8,
+                .on_color_trans_done = nullptr,
+                .user_ctx = nullptr,
                 .flags =
                     {
                         .dc_low_on_data = 0,
                         .disable_control_phase = 0,
                     },
-                .scl_speed_hz = 400 * 1000,
             };
             esp_lcd_panel_io_handle_t panel_io = nullptr;
             ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(oled_i2c_bus, &io_config, &panel_io));
@@ -662,11 +662,11 @@ private:
 
         // Klik 2x: Ganti Tema Tampilan (Thema 1 Robot <-> Thema 2 WhatsApp Chat)
         boot_button_.OnDoubleClick([this]() {
-            auto lcd = dynamic_cast<LcdDisplay*>(GetDisplay());
-            if (lcd) {
-                int next_id = (lcd->GetUiThemeId() == 1) ? 2 : 1;
+            auto display = GetDisplay();
+            if (display && display->IsLcdDisplay()) {
+                int next_id = (display->GetUiThemeId() == 1) ? 2 : 1;
                 ESP_LOGI(TAG, "BOOT button double click: switching UI theme to %d", next_id);
-                lcd->SetUiThemeId(next_id);
+                display->SetUiThemeId(next_id);
             }
         });
 
@@ -688,11 +688,11 @@ private:
         // Klik 1x: Volume +10% (atau Zoom In jika kamera streaming aktif)
         volume_up_button_.OnClick([this]() {
             if (camera_ && camera_->IsStreaming()) {
-                auto lcd = dynamic_cast<LcdDisplay*>(GetDisplay());
-                if (lcd) {
-                    int level = lcd->ZoomIn();
+                auto display = GetDisplay();
+                if (display && display->IsLcdDisplay()) {
+                    int level = display->ZoomIn();
                     ESP_LOGI(TAG, "Zoom IN clicked (GPIO 14) -> %dx", level);
-                    lcd->ShowNotification("Zoom: " + std::to_string(level) + "x");
+                    display->ShowNotification("Zoom: " + std::to_string(level) + "x");
                 }
                 return;
             }
@@ -731,11 +731,11 @@ private:
         // Klik 1x: Volume -10% (atau Zoom Out jika kamera streaming aktif)
         volume_down_button_.OnClick([this]() {
             if (camera_ && camera_->IsStreaming()) {
-                auto lcd = dynamic_cast<LcdDisplay*>(GetDisplay());
-                if (lcd) {
-                    int level = lcd->ZoomOut();
+                auto display = GetDisplay();
+                if (display && display->IsLcdDisplay()) {
+                    int level = display->ZoomOut();
                     ESP_LOGI(TAG, "Zoom OUT clicked (GPIO 46) -> %dx", level);
-                    lcd->ShowNotification("Zoom: " + std::to_string(level) + "x");
+                    display->ShowNotification("Zoom: " + std::to_string(level) + "x");
                 }
                 return;
             }
@@ -915,10 +915,10 @@ public:
         InitializeCamera();
 
         // Set up camera streaming callback to display (color LCD like ST7789 only)
-        if (camera_ && dynamic_cast<LcdDisplay*>(display_) != nullptr) {
+        if (camera_ && display_ && display_->IsLcdDisplay()) {
             camera_->SetStreamCallback([this](uint8_t* data, size_t len, uint16_t w, uint16_t h) {
-                auto display = dynamic_cast<LcdDisplay*>(GetDisplay());
-                if (!display || !data || len == 0)
+                auto display = GetDisplay();
+                if (!display || !display->IsLcdDisplay() || !data || len == 0)
                     return;
 
                 if (w == 640 && h == 480) {
@@ -995,8 +995,8 @@ public:
 
             // Set up capture animation callback (flash effect)
             camera_->SetCaptureCallback([this]() {
-                auto display = dynamic_cast<LcdDisplay*>(GetDisplay());
-                if (display) {
+                auto display = GetDisplay();
+                if (display && display->IsLcdDisplay()) {
                     display->ShowCaptureFlash();
                 }
             });
@@ -1412,7 +1412,7 @@ public:
     }
 
     virtual int RotateDisplay(int target_rot = -1) override {
-        if (!panel_ || dynamic_cast<LvglDisplay*>(display_) == nullptr)
+        if (!panel_ || !display_ || !display_->SupportsGuiOperations())
             return -1;
 
         if (target_rot == 0 || target_rot == 180) {

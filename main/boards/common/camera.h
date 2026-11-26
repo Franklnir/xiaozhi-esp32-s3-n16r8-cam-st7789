@@ -1,8 +1,10 @@
 #ifndef CAMERA_H
 #define CAMERA_H
 
-#include <string>
+#include <expected>
 #include <functional>
+#include <string>
+
 #include "device_state.h"
 
 class Camera {
@@ -16,14 +18,17 @@ public:
     virtual bool IsHMirror() const { return false; }
     virtual bool IsVFlip() const { return false; }
     virtual bool SetSwapBytes(bool enabled) { return false; }  // Optional, default no-op
-    virtual std::string Explain(const std::string& question) = 0;
-    
+    virtual std::expected<std::string, std::string> Explain(const std::string& question) = 0;
+    virtual std::expected<std::string, std::string> Explain(const std::string& question,
+                                                            const std::string& url,
+                                                            const std::string& token) = 0;
+
     // Streaming methods
     virtual bool StartStreaming() { return false; }
     virtual void StopStreaming() {}
     virtual bool IsStreaming() const { return false; }
     virtual void SetStreamCallback(std::function<void(uint8_t* data, size_t len, uint16_t w, uint16_t h)> callback) {}
-    
+
     // Capture animation callback
     virtual void SetCaptureCallback(std::function<void()> callback) {}
 

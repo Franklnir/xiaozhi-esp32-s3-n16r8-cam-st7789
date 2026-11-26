@@ -1,6 +1,5 @@
 #include "application.h"
 #include "youtube_audio_poller.h"
-#include <algorithm>
 
 namespace {
 std::string ToLowerAscii(std::string text) {
@@ -18,7 +17,7 @@ bool IsLocalSongStopCommand(const std::string& lowered_text) {
            has("pause") || has("cukup") || has("matikan musik") || has("matikan lagu") ||
            has("matikan") || has("diam");
 }
-} // namespace
+}  // namespace
 
 #include "assets.h"
 #include "assets/lang_config.h"
@@ -37,6 +36,7 @@ bool IsLocalSongStopCommand(const std::string& lowered_text) {
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include <cJSON.h>
+#include <algorithm>
 #include <cstring>
 #include <limits>
 
@@ -73,6 +73,10 @@ Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (startup_wake_word_hint_timer_ != nullptr) {
+        esp_timer_stop(startup_wake_word_hint_timer_);
+        esp_timer_delete(startup_wake_word_hint_timer_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -113,6 +117,8 @@ void Application::Initialize() {
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
+    ESP_LOGI(TAG, "After board/audio init");
+    SystemInfo::PrintHeapStats();
 
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
@@ -153,6 +159,11 @@ void Application::Initialize() {
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
+    // Registration is complete here, so this is the only place the whole inventory exists.
+    // It is logged because a server that accepts a bounded number of tools drops the rest
+    // quietly: the only sign on this device was an alert at boot and a sad face, which is
+    // easy to see and hard to connect to a tool list.
+    mcp_server.LogToolInventory();
 
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
@@ -230,7 +241,8 @@ void Application::Run() {
         MAIN_EVENT_VAD_CHANGE | MAIN_EVENT_CLOCK_TICK | MAIN_EVENT_ERROR |
         MAIN_EVENT_NETWORK_CONNECTED | MAIN_EVENT_NETWORK_DISCONNECTED | MAIN_EVENT_TOGGLE_CHAT |
         MAIN_EVENT_START_LISTENING | MAIN_EVENT_STOP_LISTENING | MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED;
+        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED | MAIN_EVENT_STARTUP_HINT_TIMEOUT |
+        MAIN_EVENT_PROTOCOL_PENDING;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -298,6 +310,10 @@ void Application::Run() {
             HandleStopListeningEvent();
         }
 
+        if ((bits & MAIN_EVENT_PROTOCOL_PENDING) && protocol_) {
+            protocol_->ProcessPending();
+        }
+
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
@@ -344,7 +360,8 @@ void Application::Run() {
                 if (audio_service_.IsPlaybackIdle()) {
                     speaking_idle_ticks_++;
                     if (speaking_idle_ticks_ >= 25) {
-                        ESP_LOGW(TAG, "Speaking state watchdog: audio playback idle for %d s, restoring to Idle", speaking_idle_ticks_);
+                        ESP_LOGW(TAG, "Speaking state watchdog: audio playback idle for %d s, restoring to Idle",
+                                 speaking_idle_ticks_);
                         speaking_idle_ticks_ = 0;
                         SetDeviceState(kDeviceStateIdle);
                     }
@@ -362,6 +379,10 @@ void Application::Run() {
                 // SystemInfo::PrintTaskCpuUsage(pdMS_TO_TICKS(1000));
             }
         }
+        if (bits & MAIN_EVENT_STARTUP_HINT_TIMEOUT) {
+            HideStartupWakeWordHint();
+        }
+        ShowStartupWakeWordHint();
     }
 }
 
@@ -418,20 +439,32 @@ void Application::HandleActivationDoneEvent() {
 
     has_server_time_ = ota_->HasServerTime();
 
-    auto display = Board::GetInstance().GetDisplay();
-    std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
-    display->ShowNotification(message.c_str());
-    display->SetChatMessage("system", "");
+    // Protocol start may have already raised MAIN_EVENT_ERROR. Do not replace
+    // that alert with the "ready" UI/sound — the main loop can process both
+    // events back-to-back because the activation task is lower priority.
+    const bool has_error = !last_error_message_.empty();
+    if (!startup_completed_) {
+        startup_completed_ = true;
+        pending_startup_wake_word_hint_ = !has_error;
+    }
+    if (!has_error) {
+        auto display = Board::GetInstance().GetDisplay();
+        std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
+        display->ShowNotification(message.c_str());
+        display->SetChatMessage("system", "");
+    }
 
     // Release OTA object after activation is complete
     ota_.reset();
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
-    Schedule([this]() {
-        // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
-    });
+    if (!has_error) {
+        Schedule([this]() {
+            // Play the success sound to indicate the device is ready
+            audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        });
+    }
 }
 
 void Application::ActivationTask() {
@@ -508,7 +541,14 @@ void Application::CheckAssetsVersion() {
     // Apply assets
     assets.Apply();
     display->SetChatMessage("system", "");
-    display->SetEmotion("robot_2");
+    // "robot_2" is declared only by a board shipping its own pack: esp-vocat maps it to
+    // neutral.eaf, and the rgb-matrix display special-cases the string. None of the shared
+    // esp_emote_assets packs (320_240, 360_360, 1024_600) declares it, so on every board that
+    // uses one this call fails, logs two errors and leaves whatever face was already up.
+    // Fall back to an emotion all three packs do declare.
+    if (!display->SetEmotion("robot_2")) {
+        display->SetEmotion("neutral");
+    }
 }
 
 void Application::CheckNewVersion() {
@@ -521,21 +561,21 @@ void Application::CheckNewVersion() {
         auto display = board.GetDisplay();
         display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
 
-        esp_err_t err = ota_->CheckVersion();
-        if (err != ESP_OK) {
+        auto check = ota_->CheckVersion();
+        if (!check) {
             retry_count++;
             if (retry_count >= MAX_RETRY) {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
                 return;
             }
 
-            char error_message[128];
+            const auto& err = check.error();
+            char error_message[160];
             int error_message_length =
-                snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err,
-                         ota_->GetCheckVersionUrl().c_str());
+                snprintf(error_message, sizeof(error_message), "%s", err.ToString().c_str());
             if (error_message_length < 0 ||
                 error_message_length >= static_cast<int>(sizeof(error_message))) {
-                snprintf(error_message, sizeof(error_message), "code=%d", err);
+                snprintf(error_message, sizeof(error_message), "%s", err.Message());
             }
 
             char buffer[320];
@@ -544,7 +584,7 @@ void Application::CheckNewVersion() {
                          retry_delay, error_message);
             if (alert_message_length < 0 ||
                 alert_message_length >= static_cast<int>(sizeof(buffer))) {
-                snprintf(buffer, sizeof(buffer), "code=%d", err);
+                snprintf(buffer, sizeof(buffer), "%s", err.Message());
             }
             Alert(Lang::Strings::ERROR, buffer, "cloud_off", Lang::Sounds::OGG_EXCLAMATION);
 
@@ -650,6 +690,8 @@ void Application::InitializeProtocol() {
         }
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+            auto display = Board::GetInstance().GetDisplay();
+            display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
         });
     });
@@ -797,10 +839,9 @@ void Application::InitializeProtocol() {
             if (cJSON_IsObject(payload)) {
                 CJsonStringUniquePtr payload_json(cJSON_PrintUnformatted(payload));
                 if (payload_json) {
-                    Schedule(
-                        [this, display, payload_str = std::string(payload_json.get())]() {
-                            display->SetChatMessage("system", payload_str.c_str());
-                        });
+                    Schedule([this, display, payload_str = std::string(payload_json.get())]() {
+                        display->SetChatMessage("system", payload_str.c_str());
+                    });
                 }
             } else {
                 ESP_LOGW(TAG, "Invalid custom message format: missing payload");
@@ -851,6 +892,7 @@ void Application::Alert(const char* status, const char* message, const char* emo
 }
 
 void Application::DismissAlert() {
+    last_error_message_.clear();
     if (GetDeviceState() == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
         display->SetStatus(Lang::Strings::STANDBY);
@@ -1108,8 +1150,15 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateIdle:
             if (!YouTubeAudioPoller::GetInstance().IsPlaying()) {
                 display->StopMusicVisualizer();
-                display->SetStatus(Lang::Strings::STANDBY);
-                display->SetEmotion("neutral");
+                // Keep a just-raised network error visible. SetDeviceState(idle)
+                // queues STATE_CHANGED after Alert(), and the idle handler would
+                // otherwise wipe the status, emotion, and chat message.
+                if (last_error_message_.empty()) {
+                    display->SetStatus(Lang::Strings::STANDBY);
+                    display->ClearChatMessages();  // Clear messages first
+                    display->SetEmotion(
+                        "neutral");  // Then set emotion (wechat mode checks child count)
+                }
                 audio_service_.EnableVoiceProcessing(false);
                 audio_service_.EnableWakeWordDetection(true);
             }
@@ -1168,6 +1217,74 @@ void Application::HandleStateChangedEvent() {
             // Do nothing
             break;
     }
+}
+
+void Application::ShowStartupWakeWordHint() {
+    // A coalesced activation/state event can queue another idle UI cleanup.
+    // Wait for it before adding the hint, or ClearChatMessages() would erase it.
+    if (!pending_startup_wake_word_hint_ ||
+        (xEventGroupGetBits(event_group_) & MAIN_EVENT_STATE_CHANGED)) {
+        return;
+    }
+    pending_startup_wake_word_hint_ = false;
+    const auto state = GetDeviceState();
+    const bool wake_word_running = audio_service_.IsWakeWordRunning();
+    if (state != kDeviceStateIdle || !last_error_message_.empty() || !wake_word_running) {
+        ESP_LOGI(TAG, "Startup wake word hint skipped (state=%d, wake word running=%d, error=%d)",
+                 static_cast<int>(state), wake_word_running, !last_error_message_.empty());
+        return;
+    }
+
+    const auto wake_words = audio_service_.GetWakeWords();
+    std::string words;
+    for (auto it = wake_words.begin(); it != wake_words.end(); ++it) {
+        if (it->empty() || std::find(wake_words.begin(), it, *it) != it) {
+            continue;
+        }
+        if (!words.empty()) {
+            words += " / ";
+        }
+        words += *it;
+    }
+    if (words.empty()) {
+        ESP_LOGW(TAG, "Startup wake word hint skipped: no available wake words");
+        return;
+    }
+    std::string message = Lang::Strings::WAKE_WORD_HINT;
+    const auto placeholder = message.find("%s");
+    if (placeholder == std::string::npos) {
+        ESP_LOGE(TAG, "Startup wake word hint skipped: invalid message template");
+        return;
+    }
+    message.replace(placeholder, 2, words);
+    if (startup_wake_word_hint_timer_ == nullptr) {
+        esp_timer_create_args_t timer_args = {
+            .callback =
+                [](void* arg) {
+                    auto app = static_cast<Application*>(arg);
+                    xEventGroupSetBits(app->event_group_, MAIN_EVENT_STARTUP_HINT_TIMEOUT);
+                },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "startup_hint",
+            .skip_unhandled_events = false,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &startup_wake_word_hint_timer_));
+    }
+    ESP_LOGI(TAG, "Startup wake word hint: %s", message.c_str());
+    Board::GetInstance().GetDisplay()->SetChatMessage("assistant", message.c_str());
+    startup_wake_word_hint_message_ = std::move(message);
+    ESP_ERROR_CHECK(esp_timer_start_once(startup_wake_word_hint_timer_, 5000 * 1000));
+}
+
+void Application::HideStartupWakeWordHint() {
+    if (startup_wake_word_hint_message_.empty()) {
+        return;
+    }
+    // A conversation or alert may have replaced the hint while its timer was running.
+    Board::GetInstance().GetDisplay()->RemoveChatMessage("assistant",
+                                                         startup_wake_word_hint_message_.c_str());
+    startup_wake_word_hint_message_.clear();
 }
 
 void Application::StartListeningAudio() {
@@ -1402,65 +1519,6 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 }
 
-void Application::SpeakNotification(const std::string& app, const std::string& title, const std::string& message) {
-    Schedule([this, app, title, message]() {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
-            return;
-        }
-        std::string prompt = "Bacakan notifikasi singkat ini dengan bahasa Indonesia: Dari " + app;
-        if (!title.empty()) {
-            prompt += ", " + title;
-        }
-        prompt += ": " + message;
-
-        if (protocol_ && protocol_->IsAudioChannelOpened()) {
-            protocol_->SendWakeWordDetected(prompt);
-            protocol_->SendStopListening();
-        } else if (protocol_) {
-            BeginWakeWordInvoke(prompt);
-        }
-    });
-}
-
-void Application::WakeUpAfterPlayback(const std::string& title) {
-    Schedule([this, title]() {
-        auto display = Board::GetInstance().GetDisplay();
-        if (display != nullptr) {
-            std::string ask_msg =
-                "🎵 Lagu '" + title +
-                "' selesai diputar! Gimana menurutmu lagunya? Mau bahas topik tadi atau putar lagu lain?";
-            display->SetChatMessage("assistant", ask_msg.c_str());
-            display->SetEmotion("happy");
-            display->ShowNotification("Lagu Selesai Diputar", 3000);
-        }
-
-        // Clean up audio hardware decoder
-        audio_service_.ResetDecoder();
-
-        // Ensure state is idle first so transitions to connecting/listening succeed
-        if (GetDeviceState() != kDeviceStateIdle) {
-            SetDeviceState(kDeviceStateIdle);
-        }
-
-        // Pastikan performa sistem maksimal agar koneksi WebSocket dan respon instan
-        Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
-
-        // Langsung masuk ke mode menyimak (listening) secara aman & bersih
-        // tanpa memanggil encode wake word palsu yang memblokir FreeRTOS watchdog
-        ListeningMode mode = GetDefaultListeningMode();
-        play_popup_on_listening_ = true;
-
-        if (protocol_ != nullptr) {
-            if (!protocol_->IsAudioChannelOpened()) {
-                SetDeviceState(kDeviceStateConnecting);
-                Schedule([this, mode]() { ContinueOpenAudioChannel(mode); });
-                return;
-            }
-            SetListeningMode(mode);
-        }
-    });
-}
-
 bool Application::CanEnterSleepMode() {
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;
@@ -1522,6 +1580,66 @@ void Application::SetAecMode(AecMode mode) {
 }
 
 void Application::PlaySound(const std::string_view& sound) { audio_service_.PlaySound(sound); }
+
+void Application::SpeakNotification(const std::string& app, const std::string& title,
+                                    const std::string& message) {
+    Schedule([this, app, title, message]() {
+        if (GetDeviceState() == kDeviceStateSpeaking) {
+            return;
+        }
+        std::string prompt = "Bacakan notifikasi singkat ini dengan bahasa Indonesia: Dari " + app;
+        if (!title.empty()) {
+            prompt += ", " + title;
+        }
+        prompt += ": " + message;
+
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            protocol_->SendWakeWordDetected(prompt);
+            protocol_->SendStopListening();
+        } else if (protocol_) {
+            BeginWakeWordInvoke(prompt);
+        }
+    });
+}
+
+void Application::WakeUpAfterPlayback(const std::string& title) {
+    Schedule([this, title]() {
+        auto display = Board::GetInstance().GetDisplay();
+        if (display != nullptr) {
+            std::string ask_msg =
+                "🎵 Lagu '" + title +
+                "' selesai diputar! Gimana menurutmu lagunya? Mau bahas topik tadi atau putar lagu lain?";
+            display->SetChatMessage("assistant", ask_msg.c_str());
+            display->SetEmotion("happy");
+            display->ShowNotification("Lagu Selesai Diputar", 3000);
+        }
+
+        // Clean up audio hardware decoder
+        audio_service_.ResetDecoder();
+
+        // Ensure state is idle first so transitions to connecting/listening succeed
+        if (GetDeviceState() != kDeviceStateIdle) {
+            SetDeviceState(kDeviceStateIdle);
+        }
+
+        // Pastikan performa sistem maksimal agar koneksi WebSocket dan respon instan
+        Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+
+        // Langsung masuk ke mode menyimak (listening) secara aman & bersih
+        // tanpa memanggil encode wake word palsu yang memblokir FreeRTOS watchdog
+        ListeningMode mode = GetDefaultListeningMode();
+        play_popup_on_listening_ = true;
+
+        if (protocol_ != nullptr) {
+            if (!protocol_->IsAudioChannelOpened()) {
+                SetDeviceState(kDeviceStateConnecting);
+                Schedule([this, mode]() { ContinueOpenAudioChannel(mode); });
+                return;
+            }
+            SetListeningMode(mode);
+        }
+    });
+}
 
 void Application::CloseAudioChannel() {
     Schedule([this]() {

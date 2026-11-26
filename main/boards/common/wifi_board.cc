@@ -362,7 +362,10 @@ std::string WifiBoard::GetDeviceStatusJson() {
     if (board.GetTemperature(temp)) {
         auto chip = cJSON_CreateObject();
         cJSON_AddNumberToObject(chip, "temperature", temp);
+        cJSON_AddItemToObject(root, "chip", chip);
     }
+
+    AddSystemStatus(root);
 
     // Wake word info
     auto wake_word = cJSON_CreateObject();
